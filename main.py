@@ -2,224 +2,246 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import uvicorn
+from database import connect_db, disconnect_db, create_tables, db_pool
 
 # ──────────────────────────────────────────────
 # APP SETUP
-# Think of this like your MuleSoft API spec —
-# this defines your entire API in one place
 # ──────────────────────────────────────────────
 app = FastAPI(
-    title="Employee Management DashBoard",
-    description="FastAPI backend for Employee Management System",
-    version="1.0.0"
+    title="Employee Management API",
+    description="FastAPI + PostgreSQL backend for Employee Management System",
+    version="2.0.0"
 )
 
 # ──────────────────────────────────────────────
-# CORS MIDDLEWARE
-# This allows your React app to call this API
-# Without this → browser blocks all requests!
-# MuleSoft analogy: like allowing HTTP calls
-# from external systems in your API policy
+# CORS — Allow React frontend to call this API
 # ──────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # In production: add your Render URL here
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],        # Allow GET, POST, PUT, DELETE
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ──────────────────────────────────────────────
-# DATA MODEL (Schema)
-# Like your DataWeave schema / JSON structure
-# Pydantic validates every request automatically!
+# STARTUP & SHUTDOWN
+@app.on_event("startup")
+async def startup():
+    await connect_db()    # Connect to PostgreSQL
+    await create_tables() # Create tables if not exist
+
+@app.on_event("shutdown")
+async def shutdown():
+    await disconnect_db() # Clean disconnect
+
+
 # ──────────────────────────────────────────────
+# DATA MODEL
+# Pydantic validates every incoming request
+
 class Employee(BaseModel):
-    id: Optional[int] = None
-    name: str
-    role: str
+    name:       str
+    role:       str
     department: str
-    salary: float
-    status: str
-    email: str
-    joined: str
-
-# ──────────────────────────────────────────────
-# IN-MEMORY DATABASE
-# Like a flow variable storing your payload
-# Simple list — we'll upgrade to PostgreSQL later
-# ──────────────────────────────────────────────
-employees_db = [
-    {"id": 1, "name": "Sarah Mitchell",  "role": "Senior Developer",   "department": "Engineering", "salary": 85000, "status": "Active",   "email": "sarah@company.com",  "joined": "2020-03-15"},
-    {"id": 2, "name": "James Okafor",    "role": "MuleSoft Architect",  "department": "Integration", "salary": 95000, "status": "Active",   "email": "james@company.com",  "joined": "2019-07-22"},
-    {"id": 3, "name": "Priya Sharma",    "role": "Data Analyst",        "department": "Analytics",   "salary": 72000, "status": "Active",   "email": "priya@company.com",  "joined": "2021-01-10"},
-    {"id": 4, "name": "Tom Henderson",   "role": "Product Manager",     "department": "Product",     "salary": 90000, "status": "On Leave", "email": "tom@company.com",    "joined": "2018-11-05"},
-    {"id": 5, "name": "Aisha Patel",     "role": "UX Designer",         "department": "Design",      "salary": 78000, "status": "Active",   "email": "aisha@company.com",  "joined": "2022-04-18"},
-    {"id": 6, "name": "Carlos Mendez",   "role": "DevOps Engineer",     "department": "Engineering", "salary": 88000, "status": "Active",   "email": "carlos@company.com", "joined": "2020-09-01"},
-]
-
-# Auto-increment ID counter
-next_id = 7
+    salary:     float
+    status:     str
+    email:      str
+    joined:     Optional[str] = None
 
 
 # ══════════════════════════════════════════════
-# API ENDPOINTS (Your MuleSoft Flow equivalents)
+# API ENDPOINTS
 # ══════════════════════════════════════════════
 
 # ──────────────────────────────────────────────
 # HEALTH CHECK
-# Always have this — Render uses it to verify
-# your service is running (like MuleSoft /ping)
 # ──────────────────────────────────────────────
 @app.get("/")
-def health_check():
+async def health_check():
     return {
-        "status": "healthy",
+        "status":  "healthy",
         "service": "Employee Management API",
-        "version": "1.0.0"
+        "version": "2.0.0",
+        "database": "PostgreSQL"
     }
 
 # ──────────────────────────────────────────────
 # GET ALL EMPLOYEES
-# MuleSoft equivalent:
-#   GET /api/employees → Database SELECT → Transform → Return JSON
+# SQL: SELECT * FROM employees
 # ──────────────────────────────────────────────
 @app.get("/api/employees")
-def get_all_employees(department: Optional[str] = None, status: Optional[str] = None):
-    """
-    Get all employees.
-    Optional filters: ?department=Engineering or ?status=Active
-    """
-    result = employees_db.copy()
+async def get_all_employees(
+    department: Optional[str] = None,
+    status:     Optional[str] = None
+):
+    async with db_pool.acquire() as conn:
 
-    # Filter by department if provided (like DataWeave filter)
-    if department:
-        result = [e for e in result if e["department"].lower() == department.lower()]
+        # Build query dynamically based on filters
+        # Like DataWeave building dynamic WHERE clause
+        query  = "SELECT * FROM employees WHERE 1=1"
+        params = []
 
-    # Filter by status if provided
-    if status:
-        result = [e for e in result if e["status"].lower() == status.lower()]
+        if department:
+            params.append(department)
+            query += f" AND LOWER(department) = LOWER(${len(params)})"
 
-    return {
-        "total": len(result),
-        "employees": result
-    }
+        if status:
+            params.append(status)
+            query += f" AND LOWER(status) = LOWER(${len(params)})"
+
+        query += " ORDER BY id"
+
+        rows = await conn.fetch(query, *params)
+
+        # Convert rows to list of dicts
+        employees = [dict(row) for row in rows]
+
+        return {
+            "total":     len(employees),
+            "employees": employees
+        }
 
 # ──────────────────────────────────────────────
-# GET SINGLE EMPLOYEE BY ID
-# MuleSoft equivalent:
-#   GET /api/employees/{id} → Find by ID → Return or 404
+# GET SINGLE EMPLOYEE
+# SQL: SELECT * FROM employees WHERE id = $1
 # ──────────────────────────────────────────────
 @app.get("/api/employees/{employee_id}")
-def get_employee(employee_id: int):
-    """Get a single employee by ID"""
-
-    # Find employee (like DataWeave filter with single result)
-    employee = next((e for e in employees_db if e["id"] == employee_id), None)
-
-    if not employee:
-        # Like MuleSoft On-Error → raise HTTP 404
-        raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found")
-
-    return employee
+async def get_employee(employee_id: int):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM employees WHERE id = $1",
+            employee_id
+        )
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Employee {employee_id} not found"
+            )
+        return dict(row)
 
 # ──────────────────────────────────────────────
-# CREATE NEW EMPLOYEE
-# MuleSoft equivalent:
-#   POST /api/employees → Validate → Insert → Return created
+# CREATE EMPLOYEE
+# SQL: INSERT INTO employees ... RETURNING *
+# MuleSoft: Database INSERT operation
 # ──────────────────────────────────────────────
 @app.post("/api/employees", status_code=201)
-def create_employee(employee: Employee):
-    """Create a new employee"""
-    global next_id
-
-    # Build new employee object
-    new_employee = employee.dict()
-    new_employee["id"] = next_id
-    next_id += 1
-
-    # Add to our in-memory DB
-    employees_db.append(new_employee)
-
-    return {
-        "message": "Employee created successfully",
-        "employee": new_employee
-    }
+async def create_employee(employee: Employee):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO employees
+                (name, role, department, salary, status, email, joined)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+        """,
+            employee.name,
+            employee.role,
+            employee.department,
+            employee.salary,
+            employee.status,
+            employee.email,
+            employee.joined
+        )
+        return {
+            "message":  "Employee created successfully",
+            "employee": dict(row)
+        }
 
 # ──────────────────────────────────────────────
 # UPDATE EMPLOYEE
-# MuleSoft equivalent:
-#   PUT /api/employees/{id} → Find → Update fields → Return updated
+# SQL: UPDATE employees SET ... WHERE id = $1
+# MuleSoft: Database UPDATE operation
 # ──────────────────────────────────────────────
 @app.put("/api/employees/{employee_id}")
-def update_employee(employee_id: int, updated: Employee):
-    """Update an existing employee"""
+async def update_employee(employee_id: int, employee: Employee):
+    async with db_pool.acquire() as conn:
 
-    # Find index of employee
-    index = next((i for i, e in enumerate(employees_db) if e["id"] == employee_id), None)
+        # Check exists first
+        exists = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1",
+            employee_id
+        )
+        if not exists:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Employee {employee_id} not found"
+            )
 
-    if index is None:
-        raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found")
-
-    # Update employee (keep same ID)
-    updated_employee = updated.dict()
-    updated_employee["id"] = employee_id
-    employees_db[index] = updated_employee
-
-    return {
-        "message": "Employee updated successfully",
-        "employee": updated_employee
-    }
+        row = await conn.fetchrow("""
+            UPDATE employees SET
+                name       = $1,
+                role       = $2,
+                department = $3,
+                salary     = $4,
+                status     = $5,
+                email      = $6,
+                joined     = $7
+            WHERE id = $8
+            RETURNING *
+        """,
+            employee.name,
+            employee.role,
+            employee.department,
+            employee.salary,
+            employee.status,
+            employee.email,
+            employee.joined,
+            employee_id
+        )
+        return {
+            "message":  "Employee updated successfully",
+            "employee": dict(row)
+        }
 
 # ──────────────────────────────────────────────
 # DELETE EMPLOYEE
-# MuleSoft equivalent:
-#   DELETE /api/employees/{id} → Find → Remove → Return confirmation
+# SQL: DELETE FROM employees WHERE id = $1
 # ──────────────────────────────────────────────
 @app.delete("/api/employees/{employee_id}")
-def delete_employee(employee_id: int):
-    """Delete an employee"""
-
-    # Find employee first
-    employee = next((e for e in employees_db if e["id"] == employee_id), None)
-
-    if not employee:
-        raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found")
-
-    # Remove from list
-    employees_db.remove(employee)
-
-    return {
-        "message": f"Employee '{employee['name']}' deleted successfully"
-    }
+async def delete_employee(employee_id: int):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "DELETE FROM employees WHERE id = $1 RETURNING name",
+            employee_id
+        )
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Employee {employee_id} not found"
+            )
+        return {
+            "message": f"Employee '{row['name']}' deleted successfully"
+        }
 
 # ──────────────────────────────────────────────
-# GET STATS (Bonus endpoint — powers your dashboard)
+# GET STATS
+# SQL: Multiple aggregation queries
 # ──────────────────────────────────────────────
 @app.get("/api/stats")
-def get_stats():
-    """Get dashboard statistics"""
+async def get_stats():
+    async with db_pool.acquire() as conn:
 
-    total = len(employees_db)
-    active = len([e for e in employees_db if e["status"] == "Active"])
-    avg_salary = sum(e["salary"] for e in employees_db) / total if total else 0
-    departments = len(set(e["department"] for e in employees_db))
+        # Run all stat queries in parallel
+        total      = await conn.fetchval("SELECT COUNT(*) FROM employees")
+        active     = await conn.fetchval("SELECT COUNT(*) FROM employees WHERE status = 'Active'")
+        avg_salary = await conn.fetchval("SELECT AVG(salary) FROM employees")
 
-    return {
-        "total_employees": total,
-        "active_employees": active,
-        "average_salary": round(avg_salary, 2),
-        "total_departments": departments,
-        "department_breakdown": {
-            dept: len([e for e in employees_db if e["department"] == dept])
-            for dept in set(e["department"] for e in employees_db)
+        # Department breakdown
+        dept_rows  = await conn.fetch("""
+            SELECT department, COUNT(*) as count
+            FROM employees
+            GROUP BY department
+            ORDER BY department
+        """)
+
+        return {
+            "total_employees":      total,
+            "active_employees":     active,
+            "average_salary":       round(float(avg_salary or 0), 2),
+            "total_departments":    len(dept_rows),
+            "department_breakdown": {
+                row["department"]: row["count"]
+                for row in dept_rows
+            }
         }
-    }
-
-
-# ──────────────────────────────────────────────
-# RUN SERVER (for local development)
-# ──────────────────────────────────────────────
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
