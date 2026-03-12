@@ -1,6 +1,5 @@
 import os
-from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
+from openapi import AsyncOpenAI
 from database import get_pool
 
 async def get_ai_response(question: str) -> str:
