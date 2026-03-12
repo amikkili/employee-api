@@ -1,5 +1,5 @@
 import os
-from openai import AsyncOpenAI
+from langchain_groq import ChatGroq
 from database import get_pool
 
 async def get_ai_response(question: str) -> str:
@@ -21,10 +21,10 @@ async def get_ai_response(question: str) -> str:
     # Step 3: Build the prompt
     # System message = AI's personality + rules
     # Human message  = the actual user question
-    llm = ChatOpenAI(
-        model="gpt-3.5-turbo",        # cost-effective model
+    llm = ChatGroq(
+        model="llama3-8b-8192",        # cost-effective model
         temperature=0.3,               # lower = more factual
-        openai_api_key=os.getenv("OPENAI_API_KEY")
+        openai_api_key=os.getenv("GROQ_API_KEY")
     )
 
     messages = [
