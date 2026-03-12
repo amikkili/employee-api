@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,6 +8,29 @@ from fastapi import Depends
 from auth import create_token, verify_token
 from users import create_users_table, find_user_by_email, create_user
 from auth import verify_password
+
+class ChatRequest(BaseModel):
+    question: str
+
+@app.post("/api/ai/chat")
+async def ai_chat(
+    request: ChatRequest,
+    current_user: str = Depends(verify_token)  # ← protected!
+):
+    """
+    AI HR Assistant endpoint.
+    Sends user question + real employee data to OpenAI.
+    Returns intelligent natural language answer.
+    """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    response = await get_ai_response(request.question)
+    return {
+        "question": request.question,
+        "answer":   response,
+        "model":    "gpt-3.5-turbo"
+    }
 
 class LoginRequest(BaseModel):
     email:    str
