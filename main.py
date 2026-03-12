@@ -3,6 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from database import connect_db, disconnect_db, create_tables, get_pool
+from fastapi import Depends
+from auth import create_token, verify_token
+from users import create_users_table, find_user_by_email, create_user
+from auth import verify_password
+
+class LoginRequest(BaseModel):
+    email:    str
+    password: str
+
+class RegisterRequest(BaseModel):
+    email:    str
+    password: str
+    name:     str
 
 app = FastAPI(
     title="Employee Management API",
@@ -22,6 +35,7 @@ app.add_middleware(
 async def startup():
     await connect_db()
     await create_tables()
+    await create_users_table()
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -56,6 +70,7 @@ async def health_check():
 async def get_all_employees(
     department: Optional[str] = None,
     status:     Optional[str] = None
+    current_user: str = Depends(verify_token)
 ):
     # get_pool() called at request time — always fresh!
     pool = get_pool()
@@ -161,3 +176,76 @@ async def get_stats():
             "total_departments":    len(dept_rows),
             "department_breakdown": {r["department"]: r["count"] for r in dept_rows}
         }
+# ──────────────────────────────────────────────
+# JWT Token Creation & Validation
+# ──────────────────────────────────────────────
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    """
+    Login endpoint — returns JWT token if credentials valid.
+
+    MuleSoft analogy:
+    Like calling an OAuth2 token endpoint:
+    POST /oauth2/token
+    → returns { access_token: "xxx", token_type: "Bearer" }
+
+    React will store this token and send it
+    with every subsequent API request.
+    """
+    # Step 1: Find user by email
+    user = await find_user_by_email(request.email)
+
+    # Step 2: Check user exists AND password matches
+    if not user or not verify_password(request.password, user["password"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    # Step 3: Create JWT token with user info inside
+    token = create_token({"sub": user["email"], "name": user["name"]})
+
+    return {
+        "access_token": token,
+        "token_type":   "Bearer",
+        "user": {
+            "email": user["email"],
+            "name":  user["name"]
+        }
+    }
+
+
+@app.post("/auth/register", status_code=201)
+async def register(request: RegisterRequest):
+    """
+    Register a new user.
+    Creates user with hashed password in PostgreSQL.
+    """
+    user = await create_user(request.email, request.password, request.name)
+
+    if not user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+
+    return {
+        "message": "User registered successfully",
+        "user": user
+    }
+
+
+@app.get("/auth/me")
+async def get_me(current_user: str = Depends(verify_token)):
+    """
+    Protected endpoint — returns current logged-in user.
+    Depends(verify_token) = automatically checks JWT token!
+
+    MuleSoft analogy:
+    Like an API endpoint protected by OAuth2 policy.
+    No valid token → 401 Unauthorized automatically.
+
+    Test this in /docs — click the lock icon first!
+    """
+    user = await find_user_by_email(current_user)
+    return {"email": user["email"], "name": user["name"]}
