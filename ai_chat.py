@@ -1,6 +1,6 @@
 import os
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage   # ✅ correct import path
+from langchain_core.messages import HumanMessage, SystemMessage
 from database import get_pool
 
 
@@ -38,7 +38,7 @@ async def get_ai_response(question: str) -> str:
 
     # ── Step 3: Initialize Groq LLM ──────────────
     llm = ChatGroq(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         temperature=0.3,
         groq_api_key=os.getenv("GROQ_API_KEY")
     )
