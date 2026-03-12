@@ -10,9 +10,6 @@ from users import create_users_table, find_user_by_email, create_user
 from auth import verify_password
 from ai_chat import get_ai_response
 
-class ChatRequest(BaseModel):
-    question: str
-
 class LoginRequest(BaseModel):
     email:    str
     password: str
@@ -21,6 +18,9 @@ class RegisterRequest(BaseModel):
     email:    str
     password: str
     name:     str
+    
+class ChatRequest(BaseModel):
+    question: str
 
 app = FastAPI(
     title="Employee Management API",
@@ -219,7 +219,7 @@ async def login(request: LoginRequest):
         }
     }
 
-app.post("/api/ai/chat")
+@app.post("/api/ai/chat")
 async def ai_chat(
     request: ChatRequest,
     current_user: str = Depends(verify_token)
