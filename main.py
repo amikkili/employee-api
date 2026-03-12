@@ -219,25 +219,25 @@ async def login(request: LoginRequest):
         }
     }
 
-@app.post("/api/ai/chat")
+app.post("/api/ai/chat")
 async def ai_chat(
     request: ChatRequest,
-    current_user: str = Depends(verify_token)  # ← protected!
+    current_user: str = Depends(verify_token)
 ):
-    """
-    AI HR Assistant endpoint.
-    Sends user question + real employee data to OpenAI.
-    Returns intelligent natural language answer.
-    """
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-    response = await get_ai_response(request.question)
-    return {
-        "question": request.question,
-        "answer":   response,
-        "model":    "gpt-3.5-turbo"
-    }
+    try:
+        response = await get_ai_response(request.question)
+        return {
+            "question": request.question,
+            "answer":   response,
+            "model":    "llama3-8b-8192"
+        }
+    except Exception as e:
+        # This prints the EXACT error to Render logs
+        print(f"AI Chat Error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {str(e)}"   
+        )
 @app.post("/auth/register", status_code=201)
 async def register(request: RegisterRequest):
     """
