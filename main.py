@@ -69,7 +69,7 @@ async def health_check():
 @app.get("/api/employees")
 async def get_all_employees(
     department: Optional[str] = None,
-    status:     Optional[str] = None
+    status:     Optional[str] = None,
     current_user: str = Depends(verify_token)
 ):
     # get_pool() called at request time — always fresh!
