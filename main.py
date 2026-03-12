@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -229,7 +228,7 @@ async def ai_chat(
         return {
             "question": request.question,
             "answer":   response,
-            "model":    "llama3-8b-8192"
+            "model":    "llama-3.3-70b-versatile"
         }
     except Exception as e:
         # This prints the EXACT error to Render logs
