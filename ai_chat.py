@@ -1,5 +1,5 @@
 import os
-from openapi import AsyncOpenAI
+from openai import AsyncOpenAI
 from database import get_pool
 
 async def get_ai_response(question: str) -> str:
