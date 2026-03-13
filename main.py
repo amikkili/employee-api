@@ -217,7 +217,62 @@ async def login(request: LoginRequest):
             "name":  user["name"]
         }
     }
+@app.get("/api/payroll")
+async def get_payroll(current_user: str = Depends(verify_token)):
+    """
+    Calculates payroll for all employees.
+    No new table needed — derives everything from salary field.
+    Tax estimate: 20% flat rate (simplified)
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        employees = await conn.fetch(
+            "SELECT id, name, role, department, salary, status "
+            "FROM employees ORDER BY department, name"
+        )
 
+    payroll = []
+    for e in employees:
+        annual       = float(e["salary"])
+        monthly      = round(annual / 12, 2)
+        tax_rate     = 0.20
+        monthly_tax  = round(monthly * tax_rate, 2)
+        monthly_net  = round(monthly - monthly_tax, 2)
+
+        payroll.append({
+            "id":          e["id"],
+            "name":        e["name"],
+            "role":        e["role"],
+            "department":  e["department"],
+            "status":      e["status"],
+            "annual":      annual,
+            "monthly":     monthly,
+            "monthly_tax": monthly_tax,
+            "monthly_net": monthly_net,
+        })
+
+    # Department totals
+    dept_totals = {}
+    for p in payroll:
+        d = p["department"]
+        if d not in dept_totals:
+            dept_totals[d] = {"department": d, "headcount": 0,
+                              "monthly_gross": 0, "monthly_net": 0}
+        dept_totals[d]["headcount"]     += 1
+        dept_totals[d]["monthly_gross"] += p["monthly"]
+        dept_totals[d]["monthly_net"]   += p["monthly_net"]
+
+    return {
+        "employees":   payroll,
+        "dept_totals": list(dept_totals.values()),
+        "summary": {
+            "total_monthly_gross": round(sum(p["monthly"]     for p in payroll), 2),
+            "total_monthly_tax":   round(sum(p["monthly_tax"] for p in payroll), 2),
+            "total_monthly_net":   round(sum(p["monthly_net"] for p in payroll), 2),
+            "total_annual":        round(sum(p["annual"]      for p in payroll), 2),
+            "headcount":           len(payroll),
+        }
+    }
 @app.post("/api/ai/chat")
 async def ai_chat(
     request: ChatRequest,
